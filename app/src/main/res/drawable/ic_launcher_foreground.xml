@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Minimalist geometric "A" outer strokes in crisp White (#FFFFFF) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28 L76,78 L66.5,78 L54,47.5 L41.5,78 L32,78 Z" />
+
+    <!-- Soft Teal (#14B8A6) architectural crossbar & apex accent -->
+    <path
+        android:fillColor="#14B8A6"
+        android:pathData="M43.5,61 L64.5,61 L67.2,67.5 L40.8,67.5 Z" />
+
+    <!-- Subtle Soft Teal apex diamond beacon -->
+    <path
+        android:fillColor="#14B8A6"
+        android:pathData="M54,22 L57.5,25.5 L54,29 L50.5,25.5 Z" />
+</vector>
