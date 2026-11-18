@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.Button
@@ -21,6 +22,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -100,12 +102,29 @@ fun AppSettingsScreen(
                     OutlinedTextField(
                         value = uiState.baseUrl,
                         onValueChange = viewModel::updateBaseUrl,
-                        label = { Text("Main Website / Login URL") },
+                        label = { Text("Main Website / Domain URL") },
                         placeholder = { Text("https://familywebsite.com") },
                         leadingIcon = { Icon(Icons.Rounded.Public, contentDescription = null) },
                         isError = uiState.urlError != null,
                         supportingText = {
-                            Text(uiState.urlError ?: "Trailing slashes are stripped automatically.")
+                            Text(uiState.urlError ?: "Base domain used for Home & Telemetry endpoints.")
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Next
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = uiState.homeEndpoint,
+                        onValueChange = viewModel::updateHomeEndpoint,
+                        label = { Text("Home Endpoint Path") },
+                        placeholder = { Text("/home") },
+                        leadingIcon = { Icon(Icons.Rounded.Home, contentDescription = null) },
+                        supportingText = {
+                            Text("Appended to Main URL (e.g. /home loads maindomain/home).")
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
@@ -145,8 +164,22 @@ fun AppSettingsScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Text(
+                        text = "Home WebView URL",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Text(
+                        text = uiState.homeUrlPreview,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
                     Text(
                         text = "Telemetry API Endpoint",
                         style = MaterialTheme.typography.labelLarge

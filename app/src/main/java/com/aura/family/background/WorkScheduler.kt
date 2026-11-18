@@ -8,13 +8,16 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.util.concurrent.TimeUnit
 
 object WorkScheduler {
 
-    private const val PERIODIC_WORK_NAME = "aura_periodic_telemetry"
-    private const val PENDING_SYNC_WORK_NAME = "aura_pending_telemetry_sync"
+    const val PERIODIC_WORK_NAME = "aura_periodic_telemetry"
+    const val PENDING_SYNC_WORK_NAME = "aura_pending_telemetry_sync"
 
     fun schedulePeriodicTelemetry(
         context: Context,
@@ -22,14 +25,14 @@ object WorkScheduler {
         intervalMinutes: Int
     ) {
         val workManager = WorkManager.getInstance(context.applicationContext)
-        if (!enabled) {
+        // Intervals < 15 min are handled directly by AuraMonitoringService's precision ticker
+        if (!enabled || intervalMinutes < 15) {
             workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
             return
         }
 
-        val safeInterval = intervalMinutes.coerceAtLeast(15).toLong()
         val request = PeriodicWorkRequestBuilder<PeriodicTelemetryWorker>(
-            safeInterval,
+            intervalMinutes.toLong(),
             TimeUnit.MINUTES
         )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
@@ -58,5 +61,11 @@ object WorkScheduler {
             ExistingWorkPolicy.REPLACE,
             request
         )
+    }
+
+    fun observeWorkInfo(context: Context, uniqueWorkName: String): Flow<WorkInfo?> {
+        return WorkManager.getInstance(context.applicationContext)
+            .getWorkInfosForUniqueWorkFlow(uniqueWorkName)
+            .map { list -> list.firstOrNull() }
     }
 }

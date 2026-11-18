@@ -52,11 +52,24 @@ object NetworkModule {
         return rawUrl.trim().trimEnd('/')
     }
 
+    fun normalizeHomeEndpoint(rawEndpoint: String): String {
+        val trimmed = rawEndpoint.trim()
+        if (trimmed.isBlank() || trimmed == "/") return ""
+        return "/" + trimmed.trimStart('/')
+    }
+
     fun isValidWebUrl(rawUrl: String): Boolean {
         val trimmed = normalizeBaseUrl(rawUrl)
         if (trimmed.isBlank()) return false
         val parsed = trimmed.toHttpUrlOrNull() ?: return false
         return (parsed.scheme == "http" || parsed.scheme == "https") && parsed.host.isNotBlank()
+    }
+
+    fun buildHomeUrl(baseUrl: String, homeEndpoint: String): String {
+        val normalized = normalizeBaseUrl(baseUrl)
+        if (!isValidWebUrl(normalized)) return ""
+        val endpoint = normalizeHomeEndpoint(homeEndpoint)
+        return "$normalized$endpoint"
     }
 
     fun buildTelemetryEndpoint(baseUrl: String): String? {

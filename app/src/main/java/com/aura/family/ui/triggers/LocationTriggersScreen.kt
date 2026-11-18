@@ -14,11 +14,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SimCard
 import androidx.compose.material.icons.rounded.Sync
@@ -27,17 +31,20 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -45,17 +52,23 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aura.family.telemetry.SimSlotStatus
+import com.aura.family.ui.theme.AlertCrimson
 import com.aura.family.ui.theme.DeepNavy
 import com.aura.family.ui.theme.SoftTeal
+import com.aura.family.ui.theme.SuccessEmerald
 import com.aura.family.ui.theme.WarningAmber
 import com.aura.family.ui.theme.WarningAmberContainer
 import kotlinx.coroutines.flow.collectLatest
@@ -71,6 +84,10 @@ fun LocationTriggersScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val settings = uiState.settings
     val snackbarHostState = remember { SnackbarHostState() }
+
+    var customIntervalText by remember(settings.periodicIntervalMinutes) {
+        mutableStateOf(settings.periodicIntervalMinutes.toString())
+    }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collectLatest { message ->
@@ -88,6 +105,14 @@ fun LocationTriggersScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = "Back"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = viewModel::refreshSignals) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Refresh current SIM signal strength"
                         )
                     }
                 },
@@ -195,7 +220,7 @@ fun LocationTriggersScreen(
                 }
             }
 
-            // 2. SIM 1 Signal Trigger
+            // 2. SIM 1 Signal Trigger (with live signal strength readout)
             SimSignalCard(
                 title = "SIM 1 Signal Trigger",
                 slotStatus = uiState.dualSimStatus.sim1,
@@ -210,7 +235,7 @@ fun LocationTriggersScreen(
                 }
             )
 
-            // 3. SIM 2 Signal Trigger
+            // 3. SIM 2 Signal Trigger (with live signal strength readout)
             SimSignalCard(
                 title = "SIM 2 Signal Trigger",
                 slotStatus = uiState.dualSimStatus.sim2,
@@ -225,7 +250,7 @@ fun LocationTriggersScreen(
                 }
             )
 
-            // 4. Time-Based Periodic Trigger
+            // 4. Time-Based Periodic Trigger (2 min preset + custom 1+ min stepper/input)
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -233,7 +258,7 @@ fun LocationTriggersScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -267,21 +292,26 @@ fun LocationTriggersScreen(
                     }
 
                     Text(
-                        text = "Scheduled background check-in via WorkManager",
+                        text = if (settings.periodicIntervalMinutes < 15) {
+                            "Every ${settings.periodicIntervalMinutes} min · Running via Foreground Service precision loop"
+                        } else {
+                            "Every ${settings.periodicIntervalMinutes} min · Scheduled via WorkManager"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    val intervals = listOf(15, 30, 60, 120)
+                    val presetIntervals = listOf(2, 5, 15, 30, 60)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        intervals.forEach { minutes ->
+                        presetIntervals.forEach { minutes ->
                             FilterChip(
                                 selected = settings.periodicIntervalMinutes == minutes,
                                 enabled = settings.isPeriodicEnabled,
                                 onClick = {
+                                    customIntervalText = minutes.toString()
                                     viewModel.updatePeriodicTrigger(
                                         context,
                                         settings.isPeriodicEnabled,
@@ -293,6 +323,65 @@ fun LocationTriggersScreen(
                                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
                                 )
                             )
+                        }
+                    }
+
+                    // Custom number input + stepper (supports 1 min or any custom integer)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalIconButton(
+                            enabled = settings.isPeriodicEnabled && settings.periodicIntervalMinutes > 1,
+                            onClick = {
+                                val next = (settings.periodicIntervalMinutes - 1).coerceAtLeast(1)
+                                customIntervalText = next.toString()
+                                viewModel.updatePeriodicTrigger(
+                                    context,
+                                    settings.isPeriodicEnabled,
+                                    next
+                                )
+                            }
+                        ) {
+                            Icon(Icons.Rounded.Remove, contentDescription = "Decrease interval")
+                        }
+
+                        OutlinedTextField(
+                            value = customIntervalText,
+                            onValueChange = { raw ->
+                                val digits = raw.filter { it.isDigit() }
+                                customIntervalText = digits
+                                val parsed = digits.toIntOrNull()
+                                if (parsed != null && parsed >= 1) {
+                                    viewModel.updatePeriodicTrigger(
+                                        context,
+                                        settings.isPeriodicEnabled,
+                                        parsed
+                                    )
+                                }
+                            },
+                            enabled = settings.isPeriodicEnabled,
+                            label = { Text("Custom Interval (min)") },
+                            placeholder = { Text("e.g. 1 or 2") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        FilledTonalIconButton(
+                            enabled = settings.isPeriodicEnabled,
+                            onClick = {
+                                val next = settings.periodicIntervalMinutes + 1
+                                customIntervalText = next.toString()
+                                viewModel.updatePeriodicTrigger(
+                                    context,
+                                    settings.isPeriodicEnabled,
+                                    next
+                                )
+                            }
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = "Increase interval")
                         }
                     }
                 }
@@ -399,15 +488,12 @@ private fun SimSignalCard(
                             text = title,
                             style = MaterialTheme.typography.titleMedium
                         )
-                        val simSubtitle = if (slotStatus.isDetected) {
-                            val carrier = slotStatus.carrierName.ifBlank { "Active SIM" }
-                            val dbmText = slotStatus.currentDbm?.let { " · $it dBm" } ?: ""
-                            "$carrier$dbmText"
-                        } else {
-                            notDetectedText
-                        }
                         Text(
-                            text = simSubtitle,
+                            text = if (slotStatus.isDetected) {
+                                slotStatus.carrierName.ifBlank { "Active SIM" }
+                            } else {
+                                notDetectedText
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -417,6 +503,41 @@ private fun SimSignalCard(
                     checked = isEnabled,
                     onCheckedChange = onToggle
                 )
+            }
+
+            // Live Current Signal Strength Readout
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Current Signal Strength",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    val dbm = slotStatus.currentDbm
+                    val (readingText, readingColor) = when {
+                        !slotStatus.isDetected -> "Not Detected" to MaterialTheme.colorScheme.onSurfaceVariant
+                        dbm == null -> "Reading..." to MaterialTheme.colorScheme.onSurfaceVariant
+                        dbm >= -85 -> "$dbm dBm (Strong)" to SuccessEmerald
+                        dbm >= -100 -> "$dbm dBm (Fair)" to WarningAmber
+                        else -> "$dbm dBm (Weak)" to AlertCrimson
+                    }
+                    Text(
+                        text = readingText,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = readingColor
+                    )
+                }
             }
 
             Text(

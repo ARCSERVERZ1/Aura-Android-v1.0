@@ -4,9 +4,16 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import com.aura.family.background.AuraMonitoringService
+import com.aura.family.background.ServiceDiagnosticsState
 import com.aura.family.background.WorkScheduler
 import com.aura.family.data.local.PendingTelemetryDao
+import com.aura.family.data.local.PendingTelemetryEntity
 import com.aura.family.data.preferences.AuraPreferencesRepository
+import com.aura.family.data.preferences.AuraSettings
+import com.aura.family.telemetry.DualSimStatus
+import com.aura.family.telemetry.SimSignalMonitor
 import com.aura.family.telemetry.TelemetryDispatchResult
 import com.aura.family.telemetry.TelemetryManager
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -20,32 +27,57 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class HomeUiState(
-    val userName: String = "",
-    val baseUrl: String = "",
-    val isPrivacyModeEnabled: Boolean = false,
-    val pendingQueueCount: Int = 0,
+    val settings: AuraSettings = AuraSettings(),
+    val pendingItems: List<PendingTelemetryEntity> = emptyList(),
+    val serviceDiagnostics: ServiceDiagnosticsState = ServiceDiagnosticsState(),
+    val dualSimStatus: DualSimStatus = DualSimStatus(),
+    val periodicWorkState: WorkInfo.State? = null,
+    val syncWorkState: WorkInfo.State? = null,
     val isSendingManualAlert: Boolean = false
-)
+) {
+    val userName: String get() = settings.userName
+    val baseUrl: String get() = settings.baseUrl
+    val homeUrl: String get() = settings.effectiveHomeUrl
+    val isPrivacyModeEnabled: Boolean get() = settings.isPrivacyModeEnabled
+    val pendingQueueCount: Int get() = pendingItems.size
+}
 
 class HomeViewModel(
+    appContext: Context,
     private val preferencesRepository: AuraPreferencesRepository,
-    pendingTelemetryDao: PendingTelemetryDao,
+    private val pendingTelemetryDao: PendingTelemetryDao,
+    private val simSignalMonitor: SimSignalMonitor,
     private val telemetryManager: TelemetryManager
 ) : ViewModel() {
 
     private val isSendingAlert = MutableStateFlow(false)
 
-    val uiState: StateFlow<HomeUiState> = combine(
+    private val coreFlow = combine(
         preferencesRepository.settingsFlow,
-        pendingTelemetryDao.observePendingCount(),
+        pendingTelemetryDao.observeAllPending(),
+        AuraMonitoringService.diagnosticsState
+    ) { settings, pendingItems, serviceDiag ->
+        Triple(settings, pendingItems, serviceDiag)
+    }
+
+    private val workAndSimFlow = combine(
+        simSignalMonitor.dualSimStatus,
+        WorkScheduler.observeWorkInfo(appContext, WorkScheduler.PERIODIC_WORK_NAME),
+        WorkScheduler.observeWorkInfo(appContext, WorkScheduler.PENDING_SYNC_WORK_NAME),
         isSendingAlert
-    ) { settings, pendingCount, sending ->
+    ) { simStatus, periodicInfo, syncInfo, sending ->
+        Quad(simStatus, periodicInfo?.state, syncInfo?.state, sending)
+    }
+
+    val uiState: StateFlow<HomeUiState> = combine(coreFlow, workAndSimFlow) { core, extra ->
         HomeUiState(
-            userName = settings.userName,
-            baseUrl = settings.baseUrl,
-            isPrivacyModeEnabled = settings.isPrivacyModeEnabled,
-            pendingQueueCount = pendingCount,
-            isSendingManualAlert = sending
+            settings = core.first,
+            pendingItems = core.second,
+            serviceDiagnostics = core.third,
+            dualSimStatus = extra.first,
+            periodicWorkState = extra.second,
+            syncWorkState = extra.third,
+            isSendingManualAlert = extra.fourth
         )
     }.stateIn(
         scope = viewModelScope,
@@ -96,16 +128,56 @@ class HomeViewModel(
         }
     }
 
+    fun flushPendingQueue() {
+        viewModelScope.launch {
+            if (uiState.value.isPrivacyModeEnabled) {
+                _snackbarMessages.emit("Turn off Privacy Mode before syncing queued alerts")
+                return@launch
+            }
+            val synced = telemetryManager.flushPendingQueue()
+            _snackbarMessages.emit(
+                if (synced) "Offline queue synced" else "Some items failed — will retry online"
+            )
+        }
+    }
+
+    fun clearPendingQueue() {
+        viewModelScope.launch {
+            pendingTelemetryDao.clearAll()
+            _snackbarMessages.emit("Offline queue cleared")
+        }
+    }
+
+    fun restartBackgroundService(context: Context) {
+        AuraMonitoringService.start(context.applicationContext)
+        simSignalMonitor.refreshSubscriptions()
+    }
+
+    fun refreshSignals() {
+        simSignalMonitor.refreshSubscriptions()
+    }
+
+    private data class Quad<A, B, C, D>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D
+    )
+
     class Factory(
+        private val appContext: Context,
         private val preferencesRepository: AuraPreferencesRepository,
         private val pendingTelemetryDao: PendingTelemetryDao,
+        private val simSignalMonitor: SimSignalMonitor,
         private val telemetryManager: TelemetryManager
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return HomeViewModel(
+                appContext = appContext.applicationContext,
                 preferencesRepository = preferencesRepository,
                 pendingTelemetryDao = pendingTelemetryDao,
+                simSignalMonitor = simSignalMonitor,
                 telemetryManager = telemetryManager
             ) as T
         }

@@ -107,8 +107,10 @@ private fun AuraNavHost(
         composable(AuraRoutes.HOME) {
             val vm: HomeViewModel = viewModel(
                 factory = HomeViewModel.Factory(
+                    appContext = container.appContext,
                     preferencesRepository = container.preferencesRepository,
                     pendingTelemetryDao = container.database.pendingTelemetryDao(),
+                    simSignalMonitor = container.simSignalMonitor,
                     telemetryManager = container.telemetryManager
                 )
             )

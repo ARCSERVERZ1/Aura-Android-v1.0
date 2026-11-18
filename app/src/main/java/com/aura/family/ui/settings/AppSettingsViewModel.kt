@@ -18,13 +18,18 @@ import kotlinx.coroutines.launch
 data class AppSettingsUiState(
     val userName: String = "",
     val baseUrl: String = "",
+    val homeEndpoint: String = "/home",
     val nameError: String? = null,
     val urlError: String? = null,
     val isSaving: Boolean = false
 ) {
+    val homeUrlPreview: String
+        get() = NetworkModule.buildHomeUrl(baseUrl, homeEndpoint)
+            .ifBlank { "Enter a valid URL to preview Home endpoint" }
+
     val telemetryEndpointPreview: String
         get() = NetworkModule.buildTelemetryEndpoint(baseUrl)
-            ?: "Enter a valid URL to preview endpoint"
+            ?: "Enter a valid URL to preview Telemetry endpoint"
 }
 
 class AppSettingsViewModel(
@@ -43,7 +48,8 @@ class AppSettingsViewModel(
             _uiState.update {
                 it.copy(
                     userName = current.userName,
-                    baseUrl = current.baseUrl
+                    baseUrl = current.baseUrl,
+                    homeEndpoint = current.homeEndpoint
                 )
             }
         }
@@ -57,10 +63,15 @@ class AppSettingsViewModel(
         _uiState.update { it.copy(baseUrl = url, urlError = null) }
     }
 
+    fun updateHomeEndpoint(endpoint: String) {
+        _uiState.update { it.copy(homeEndpoint = endpoint) }
+    }
+
     fun saveSettings() {
         val current = _uiState.value
         val trimmedName = current.userName.trim()
         val normalizedUrl = NetworkModule.normalizeBaseUrl(current.baseUrl)
+        val normalizedEndpoint = NetworkModule.normalizeHomeEndpoint(current.homeEndpoint)
 
         var hasError = false
         var nameErr: String? = null
@@ -71,7 +82,7 @@ class AppSettingsViewModel(
             hasError = true
         }
         if (!NetworkModule.isValidWebUrl(normalizedUrl)) {
-            urlErr = "Enter a valid http:// or https:// website URL"
+            urlErr = "Enter a valid http:// or https:// domain URL"
             hasError = true
         }
 
@@ -82,11 +93,12 @@ class AppSettingsViewModel(
 
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true) }
-            preferencesRepository.saveAppSettings(trimmedName, normalizedUrl)
+            preferencesRepository.saveAppSettings(trimmedName, normalizedUrl, normalizedEndpoint)
             _uiState.update {
                 it.copy(
                     userName = trimmedName,
                     baseUrl = normalizedUrl,
+                    homeEndpoint = normalizedEndpoint,
                     isSaving = false
                 )
             }

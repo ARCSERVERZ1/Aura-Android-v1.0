@@ -64,6 +64,7 @@ class SimSignalMonitor(private val context: Context) {
         }
 
         val subManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
+        val baseTm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
         val activeList: List<SubscriptionInfo> = try {
             subManager?.activeSubscriptionInfoList.orEmpty()
         } catch (_: SecurityException) {
@@ -73,6 +74,9 @@ class SimSignalMonitor(private val context: Context) {
         val slot0 = activeList.firstOrNull { it.simSlotIndex == 0 }
         val slot1 = activeList.firstOrNull { it.simSlotIndex == 1 }
 
+        val slot0InitialDbm = readCurrentSignalDbm(baseTm, slot0?.subscriptionId)
+        val slot1InitialDbm = readCurrentSignalDbm(baseTm, slot1?.subscriptionId)
+
         _dualSimStatus.update { current ->
             current.copy(
                 sim1 = SimSlotStatus(
@@ -80,16 +84,32 @@ class SimSignalMonitor(private val context: Context) {
                     isDetected = slot0 != null,
                     subscriptionId = slot0?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID,
                     carrierName = slot0?.carrierName?.toString().orEmpty(),
-                    currentDbm = if (slot0 != null) current.sim1.currentDbm else null
+                    currentDbm = if (slot0 != null) slot0InitialDbm ?: current.sim1.currentDbm else null
                 ),
                 sim2 = SimSlotStatus(
                     slotIndex = 1,
                     isDetected = slot1 != null,
                     subscriptionId = slot1?.subscriptionId ?: SubscriptionManager.INVALID_SUBSCRIPTION_ID,
                     carrierName = slot1?.carrierName?.toString().orEmpty(),
-                    currentDbm = if (slot1 != null) current.sim2.currentDbm else null
+                    currentDbm = if (slot1 != null) slot1InitialDbm ?: current.sim2.currentDbm else null
                 )
             )
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readCurrentSignalDbm(baseTm: TelephonyManager?, subId: Int?): Int? {
+        if (baseTm == null || subId == null || subId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+            return null
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                baseTm.createForSubscriptionId(subId).signalStrength?.let { extractDbm(it) }
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
         }
     }
 

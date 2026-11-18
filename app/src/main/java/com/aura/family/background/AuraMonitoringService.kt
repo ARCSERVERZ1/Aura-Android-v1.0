@@ -24,16 +24,34 @@ import com.aura.family.R
 import com.aura.family.telemetry.SimSignalMonitor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+data class ServiceDiagnosticsState(
+    val isRunning: Boolean = false,
+    val startedAtMs: Long = 0L,
+    val lastHeartbeatMs: Long = 0L,
+    val activeSchedulerMode: String = "Stopped",
+    val lastPeriodicTickMs: Long = 0L
+)
 
 class AuraMonitoringService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var batteryReceiverRegistered = false
+    private var shortIntervalJob: Job? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -55,10 +73,18 @@ class AuraMonitoringService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        val now = System.currentTimeMillis()
+        _diagnosticsState.value = ServiceDiagnosticsState(
+            isRunning = true,
+            startedAtMs = now,
+            lastHeartbeatMs = now,
+            activeSchedulerMode = "Initializing"
+        )
         createNotificationChannel()
         startForegroundWithAppropriateTypes(isPrivacyMode = false)
         registerBatteryReceiver()
-        observePrivacyModeForNotification()
+        observeSettingsAndRunLoop()
+        startHeartbeatTicker()
         startSimSignalMonitoring()
     }
 
@@ -76,6 +102,7 @@ class AuraMonitoringService : Service() {
     }
 
     override fun onDestroy() {
+        shortIntervalJob?.cancel()
         if (batteryReceiverRegistered) {
             try {
                 unregisterReceiver(batteryReceiver)
@@ -84,6 +111,9 @@ class AuraMonitoringService : Service() {
             batteryReceiverRegistered = false
         }
         (application as AuraApplication).container.simSignalMonitor.stopMonitoring()
+        _diagnosticsState.update {
+            it.copy(isRunning = false, activeSchedulerMode = "Stopped")
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -113,13 +143,84 @@ class AuraMonitoringService : Service() {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgType)
     }
 
-    private fun observePrivacyModeForNotification() {
-        val prefsRepo = (application as AuraApplication).container.preferencesRepository
+    private fun startHeartbeatTicker() {
+        serviceScope.launch {
+            while (isActive) {
+                _diagnosticsState.update { it.copy(lastHeartbeatMs = System.currentTimeMillis()) }
+                delay(15_000L)
+            }
+        }
+    }
+
+    private fun observeSettingsAndRunLoop() {
+        val container = (application as AuraApplication).container
+        val prefsRepo = container.preferencesRepository
+
         serviceScope.launch {
             prefsRepo.settingsFlow.collectLatest { settings ->
                 val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 nm?.notify(NOTIFICATION_ID, buildNotification(settings.isPrivacyModeEnabled))
             }
+        }
+
+        serviceScope.launch {
+            prefsRepo.settingsFlow
+                .map {
+                    Triple(
+                        it.isOnboardingCompleted && it.isPeriodicEnabled,
+                        it.periodicIntervalMinutes,
+                        it.isPrivacyModeEnabled
+                    )
+                }
+                .distinctUntilChanged()
+                .collectLatest { (active, intervalMinutes, privacyMode) ->
+                    shortIntervalJob?.cancel()
+                    WorkScheduler.schedulePeriodicTelemetry(
+                        context = applicationContext,
+                        enabled = active,
+                        intervalMinutes = intervalMinutes
+                    )
+
+                    if (!active) {
+                        _diagnosticsState.update {
+                            it.copy(activeSchedulerMode = "Periodic Disabled (Triggers Active)")
+                        }
+                        return@collectLatest
+                    }
+
+                    if (privacyMode) {
+                        _diagnosticsState.update {
+                            it.copy(activeSchedulerMode = "Paused (Privacy Mode ON)")
+                        }
+                        return@collectLatest
+                    }
+
+                    if (intervalMinutes < 15) {
+                        _diagnosticsState.update {
+                            it.copy(
+                                activeSchedulerMode = "Foreground Service Loop (every $intervalMinutes min)"
+                            )
+                        }
+                        shortIntervalJob = serviceScope.launch {
+                            while (isActive) {
+                                delay(intervalMinutes * 60_000L)
+                                _diagnosticsState.update {
+                                    it.copy(lastPeriodicTickMs = System.currentTimeMillis())
+                                }
+                                container.telemetryManager.triggerTelemetry(
+                                    remarks = "Periodic Update ($intervalMinutes min)",
+                                    sosFlag = false
+                                )
+                            }
+                        }
+                    } else {
+                        _diagnosticsState.update {
+                            it.copy(
+                                activeSchedulerMode = "WorkManager Periodic (every $intervalMinutes min)"
+                            )
+                        }
+                    }
+                }
         }
     }
 
@@ -236,6 +337,9 @@ class AuraMonitoringService : Service() {
     companion object {
         const val CHANNEL_ID = "aura_monitoring_channel"
         const val NOTIFICATION_ID = 1001
+
+        private val _diagnosticsState = MutableStateFlow(ServiceDiagnosticsState())
+        val diagnosticsState: StateFlow<ServiceDiagnosticsState> = _diagnosticsState.asStateFlow()
 
         fun start(context: Context) {
             val intent = Intent(context, AuraMonitoringService::class.java)

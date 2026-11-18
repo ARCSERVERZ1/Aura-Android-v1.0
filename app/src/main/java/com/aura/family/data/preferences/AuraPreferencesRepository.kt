@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.aura.family.data.remote.NetworkModule
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -20,6 +21,7 @@ private val Context.auraDataStore: DataStore<Preferences> by preferencesDataStor
 data class AuraSettings(
     val userName: String = "",
     val baseUrl: String = "",
+    val homeEndpoint: String = "/home",
     val isOnboardingCompleted: Boolean = false,
     val isPrivacyModeEnabled: Boolean = false,
     val isLowBatteryEnabled: Boolean = true,
@@ -34,13 +36,17 @@ data class AuraSettings(
     val isPeriodicEnabled: Boolean = true,
     val periodicIntervalMinutes: Int = 60,
     val lastTelemetrySummary: String = ""
-)
+) {
+    val effectiveHomeUrl: String
+        get() = NetworkModule.buildHomeUrl(baseUrl, homeEndpoint)
+}
 
 class AuraPreferencesRepository(private val context: Context) {
 
     private object Keys {
         val USER_NAME = stringPreferencesKey("user_name")
         val BASE_URL = stringPreferencesKey("base_url")
+        val HOME_ENDPOINT = stringPreferencesKey("home_endpoint")
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val PRIVACY_MODE_ENABLED = booleanPreferencesKey("privacy_mode_enabled")
 
@@ -74,6 +80,7 @@ class AuraPreferencesRepository(private val context: Context) {
             AuraSettings(
                 userName = prefs[Keys.USER_NAME] ?: "",
                 baseUrl = prefs[Keys.BASE_URL] ?: "",
+                homeEndpoint = prefs[Keys.HOME_ENDPOINT] ?: "/home",
                 isOnboardingCompleted = prefs[Keys.ONBOARDING_COMPLETED] ?: false,
                 isPrivacyModeEnabled = prefs[Keys.PRIVACY_MODE_ENABLED] ?: false,
                 isLowBatteryEnabled = prefs[Keys.LOW_BATTERY_ENABLED] ?: true,
@@ -86,7 +93,7 @@ class AuraPreferencesRepository(private val context: Context) {
                 sim2ThresholdDbm = (prefs[Keys.SIM2_THRESHOLD_DBM] ?: -105).coerceIn(-120, -50),
                 sim2LastTriggerMs = prefs[Keys.SIM2_LAST_TRIGGER_MS] ?: 0L,
                 isPeriodicEnabled = prefs[Keys.PERIODIC_ENABLED] ?: true,
-                periodicIntervalMinutes = prefs[Keys.PERIODIC_INTERVAL_MINUTES] ?: 60,
+                periodicIntervalMinutes = (prefs[Keys.PERIODIC_INTERVAL_MINUTES] ?: 60).coerceAtLeast(1),
                 lastTelemetrySummary = prefs[Keys.LAST_TELEMETRY_SUMMARY] ?: ""
             )
         }
@@ -95,16 +102,20 @@ class AuraPreferencesRepository(private val context: Context) {
         context.auraDataStore.edit { prefs ->
             prefs[Keys.USER_NAME] = userName.trim()
             if (baseUrl.isNotBlank()) {
-                prefs[Keys.BASE_URL] = baseUrl.trim().trimEnd('/')
+                prefs[Keys.BASE_URL] = NetworkModule.normalizeBaseUrl(baseUrl)
+            }
+            if (prefs[Keys.HOME_ENDPOINT] == null) {
+                prefs[Keys.HOME_ENDPOINT] = "/home"
             }
             prefs[Keys.ONBOARDING_COMPLETED] = true
         }
     }
 
-    suspend fun saveAppSettings(userName: String, baseUrl: String) {
+    suspend fun saveAppSettings(userName: String, baseUrl: String, homeEndpoint: String) {
         context.auraDataStore.edit { prefs ->
             prefs[Keys.USER_NAME] = userName.trim()
-            prefs[Keys.BASE_URL] = baseUrl.trim().trimEnd('/')
+            prefs[Keys.BASE_URL] = NetworkModule.normalizeBaseUrl(baseUrl)
+            prefs[Keys.HOME_ENDPOINT] = NetworkModule.normalizeHomeEndpoint(homeEndpoint)
         }
     }
 
@@ -153,7 +164,7 @@ class AuraPreferencesRepository(private val context: Context) {
     suspend fun updatePeriodicConfig(enabled: Boolean, intervalMinutes: Int) {
         context.auraDataStore.edit { prefs ->
             prefs[Keys.PERIODIC_ENABLED] = enabled
-            prefs[Keys.PERIODIC_INTERVAL_MINUTES] = intervalMinutes.coerceAtLeast(15)
+            prefs[Keys.PERIODIC_INTERVAL_MINUTES] = intervalMinutes.coerceAtLeast(1)
         }
     }
 

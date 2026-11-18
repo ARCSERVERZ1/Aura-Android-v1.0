@@ -63,6 +63,10 @@ class LocationTriggersViewModel(
         simSignalMonitor.refreshSubscriptions()
     }
 
+    fun refreshSignals() {
+        simSignalMonitor.refreshSubscriptions()
+    }
+
     fun updateLowBattery(enabled: Boolean, thresholdPercent: Int) {
         viewModelScope.launch {
             val snapped = ((thresholdPercent + 2) / 5) * 5
@@ -78,11 +82,12 @@ class LocationTriggersViewModel(
 
     fun updatePeriodicTrigger(context: Context, enabled: Boolean, intervalMinutes: Int) {
         viewModelScope.launch {
-            preferencesRepository.updatePeriodicConfig(enabled, intervalMinutes)
+            val clamped = intervalMinutes.coerceAtLeast(1)
+            preferencesRepository.updatePeriodicConfig(enabled, clamped)
             WorkScheduler.schedulePeriodicTelemetry(
                 context = context.applicationContext,
                 enabled = enabled,
-                intervalMinutes = intervalMinutes
+                intervalMinutes = clamped
             )
         }
     }

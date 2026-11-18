@@ -10,7 +10,7 @@ import com.aura.family.telemetry.SimSignalMonitor
 import com.aura.family.telemetry.TelemetryManager
 
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    val appContext: Context = context.applicationContext
 
     val preferencesRepository: AuraPreferencesRepository by lazy {
         AuraPreferencesRepository(appContext)

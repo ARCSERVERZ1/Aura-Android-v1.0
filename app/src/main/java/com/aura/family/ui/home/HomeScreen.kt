@@ -14,6 +14,7 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +66,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,11 +85,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aura.family.ui.diagnostics.DiagnosticsDialog
 import com.aura.family.ui.theme.DeepNavy
 import com.aura.family.ui.theme.SoftTeal
 import com.aura.family.ui.theme.SuccessEmerald
 import com.aura.family.ui.theme.WarningAmber
 import com.aura.family.ui.theme.WarningAmberContainer
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -108,8 +114,13 @@ fun HomeScreen(
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var currentLoadedUrl by remember { mutableStateOf("") }
-    var lastRequestedBaseUrl by remember { mutableStateOf("") }
+    var lastRequestedHomeUrl by remember { mutableStateOf("") }
     var pageProgress by remember { mutableIntStateOf(100) }
+    var showDiagnostics by remember { mutableStateOf(false) }
+
+    // 5-second hold progress for opening Diagnostics from the drawer username
+    var holdProgress by remember { mutableFloatStateOf(0f) }
+    var isHoldingName by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.snackbarMessages.collectLatest { message ->
@@ -131,18 +142,19 @@ fun HomeScreen(
         }
     }
 
-    // Load or reload when baseUrl changes in App Settings
-    LaunchedEffect(uiState.baseUrl, webViewRef) {
-        val target = uiState.baseUrl
+    // Load or reload when constructed homeUrl (<baseUrl><homeEndpoint>) changes in App Settings
+    LaunchedEffect(uiState.homeUrl, webViewRef) {
+        val target = uiState.homeUrl
         val wv = webViewRef
-        if (target.isNotBlank() && wv != null && target != lastRequestedBaseUrl) {
-            lastRequestedBaseUrl = target
+        if (target.isNotBlank() && wv != null && target != lastRequestedHomeUrl) {
+            lastRequestedHomeUrl = target
             wv.loadUrl(target)
         }
     }
 
     BackHandler {
         when {
+            showDiagnostics -> showDiagnostics = false
             drawerState.isOpen -> {
                 coroutineScope.launch { drawerState.close() }
             }
@@ -155,13 +167,34 @@ fun HomeScreen(
         }
     }
 
-    val activeDomainSubtitle = remember(currentLoadedUrl, uiState.baseUrl) {
-        val source = currentLoadedUrl.ifBlank { uiState.baseUrl }
+    val activeDomainSubtitle = remember(currentLoadedUrl, uiState.homeUrl) {
+        val source = currentLoadedUrl.ifBlank { uiState.homeUrl }
         if (source.isBlank()) {
             "Portal URL not set"
         } else {
-            runCatching { Uri.parse(source).host ?: source }.getOrDefault(source)
+            runCatching {
+                val uri = Uri.parse(source)
+                val host = uri.host ?: source
+                val path = uri.path.orEmpty()
+                if (path.isNotBlank() && path != "/") "$host$path" else host
+            }.getOrDefault(source)
         }
+    }
+
+    if (showDiagnostics) {
+        DiagnosticsDialog(
+            settings = uiState.settings,
+            serviceDiagnostics = uiState.serviceDiagnostics,
+            dualSimStatus = uiState.dualSimStatus,
+            pendingItems = uiState.pendingItems,
+            periodicWorkState = uiState.periodicWorkState,
+            syncWorkState = uiState.syncWorkState,
+            onFlushQueue = viewModel::flushPendingQueue,
+            onClearQueue = viewModel::clearPendingQueue,
+            onRestartService = { viewModel.restartBackgroundService(context) },
+            onRefreshSignals = viewModel::refreshSignals,
+            onDismiss = { showDiagnostics = false }
+        )
     }
 
     ModalNavigationDrawer(
@@ -171,7 +204,7 @@ fun HomeScreen(
             ModalDrawerSheet(
                 drawerContainerColor = MaterialTheme.colorScheme.surface
             ) {
-                // Drawer Header
+                // Drawer Header — Hold User Name for 5 seconds to open Diagnostics
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -179,13 +212,58 @@ fun HomeScreen(
                         .padding(horizontal = 20.dp, vertical = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = uiState.userName.ifBlank { "Aura User" },
-                        style = MaterialTheme.typography.titleLarge,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onPress = {
+                                        isHoldingName = true
+                                        holdProgress = 0f
+                                        val holdJob: Job = coroutineScope.launch {
+                                            val totalMs = 5_000L
+                                            val stepMs = 50L
+                                            var elapsed = 0L
+                                            while (elapsed < totalMs) {
+                                                delay(stepMs)
+                                                elapsed += stepMs
+                                                holdProgress = (elapsed.toFloat() / totalMs).coerceIn(0f, 1f)
+                                            }
+                                            isHoldingName = false
+                                            holdProgress = 0f
+                                            drawerState.close()
+                                            viewModel.refreshSignals()
+                                            showDiagnostics = true
+                                        }
+                                        tryAwaitRelease()
+                                        holdJob.cancel()
+                                        isHoldingName = false
+                                        holdProgress = 0f
+                                    }
+                                )
+                            }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = uiState.userName.ifBlank { "Aura User" },
+                                style = MaterialTheme.typography.titleLarge,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (isHoldingName) {
+                                LinearProgressIndicator(
+                                    progress = { holdProgress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(3.dp),
+                                    color = SoftTeal,
+                                    trackColor = Color(0xFF334155)
+                                )
+                            }
+                        }
+                    }
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -221,19 +299,6 @@ fun HomeScreen(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Rounded.Home, contentDescription = null) },
-                    label = { Text("Home (Family Portal)") },
-                    selected = true,
-                    onClick = {
-                        coroutineScope.launch { drawerState.close() }
-                        if (uiState.baseUrl.isNotBlank()) {
-                            webViewRef?.loadUrl(uiState.baseUrl)
-                        }
-                    },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
 
                 NavigationDrawerItem(
                     icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
@@ -381,8 +446,8 @@ fun HomeScreen(
                     NavigationBarItem(
                         selected = true,
                         onClick = {
-                            if (uiState.baseUrl.isNotBlank()) {
-                                webViewRef?.loadUrl(uiState.baseUrl)
+                            if (uiState.homeUrl.isNotBlank()) {
+                                webViewRef?.loadUrl(uiState.homeUrl)
                             } else {
                                 onNavigateToAppSettings()
                             }
@@ -415,16 +480,16 @@ fun HomeScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                if (uiState.baseUrl.isBlank()) {
+                if (uiState.homeUrl.isBlank()) {
                     UnconfiguredPortalView(
                         onConfigureClick = onNavigateToAppSettings
                     )
                 } else {
                     PersistentAuraWebView(
-                        initialUrl = uiState.baseUrl,
+                        initialUrl = uiState.homeUrl,
                         onWebViewCreated = { created ->
                             webViewRef = created
-                            lastRequestedBaseUrl = uiState.baseUrl
+                            lastRequestedHomeUrl = uiState.homeUrl
                         },
                         onUrlChanged = { url -> currentLoadedUrl = url },
                         onProgressChanged = { progress -> pageProgress = progress }
@@ -535,7 +600,7 @@ private fun UnconfiguredPortalView(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Add your family website login URL in App Settings to load it here with persistent sign-in.",
+            text = "Add your family website URL and home endpoint in App Settings to load it here with persistent sign-in.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
