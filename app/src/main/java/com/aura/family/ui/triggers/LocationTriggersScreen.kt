@@ -176,28 +176,64 @@ fun LocationTriggersScreen(
                         Switch(
                             checked = settings.isLowBatteryEnabled,
                             onCheckedChange = { enabled ->
-                                viewModel.updateLowBattery(enabled, settings.lowBatteryThreshold)
+                                viewModel.updateLowBattery(
+                                    context,
+                                    enabled,
+                                    settings.lowBatteryThreshold
+                                )
                             }
                         )
                     }
 
-                    Text(
-                        text = "Trigger when battery \u2264 ${settings.lowBatteryThreshold}%",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Trigger when battery \u2264 ${settings.lowBatteryThreshold}%",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilledTonalIconButton(
+                                enabled = settings.isLowBatteryEnabled && settings.lowBatteryThreshold > 1,
+                                onClick = {
+                                    viewModel.updateLowBattery(
+                                        context,
+                                        settings.isLowBatteryEnabled,
+                                        (settings.lowBatteryThreshold - 1).coerceAtLeast(1)
+                                    )
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Remove, contentDescription = "Decrease threshold")
+                            }
+                            FilledTonalIconButton(
+                                enabled = settings.isLowBatteryEnabled && settings.lowBatteryThreshold < 99,
+                                onClick = {
+                                    viewModel.updateLowBattery(
+                                        context,
+                                        settings.isLowBatteryEnabled,
+                                        (settings.lowBatteryThreshold + 1).coerceAtMost(99)
+                                    )
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Add, contentDescription = "Increase threshold")
+                            }
+                        }
+                    }
 
                     Slider(
                         value = settings.lowBatteryThreshold.toFloat(),
                         onValueChange = { raw ->
                             viewModel.updateLowBattery(
+                                context,
                                 settings.isLowBatteryEnabled,
-                                raw.roundToInt()
+                                raw.roundToInt().coerceIn(1, 99)
                             )
                         },
-                        valueRange = 5f..50f,
-                        steps = 8,
+                        valueRange = 1f..99f,
                         enabled = settings.isLowBatteryEnabled,
                         colors = SliderDefaults.colors(
                             thumbColor = SoftTeal,
@@ -209,13 +245,13 @@ fun LocationTriggersScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("5%", style = MaterialTheme.typography.labelSmall)
+                        Text("1%", style = MaterialTheme.typography.labelSmall)
                         Text(
-                            "Fires once; resets above ${settings.lowBatteryThreshold + 2}%",
+                            "Fires once; resets above ${(settings.lowBatteryThreshold + 2).coerceAtMost(100)}%",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text("50%", style = MaterialTheme.typography.labelSmall)
+                        Text("99%", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -228,10 +264,10 @@ fun LocationTriggersScreen(
                 thresholdDbm = settings.sim1ThresholdDbm,
                 notDetectedText = "SIM 1 Not Detected",
                 onToggle = { enabled ->
-                    viewModel.updateSimTrigger(0, enabled, settings.sim1ThresholdDbm)
+                    viewModel.updateSimTrigger(context, 0, enabled, settings.sim1ThresholdDbm)
                 },
                 onThresholdChange = { dbm ->
-                    viewModel.updateSimTrigger(0, settings.isSim1TriggerEnabled, dbm)
+                    viewModel.updateSimTrigger(context, 0, settings.isSim1TriggerEnabled, dbm)
                 }
             )
 
@@ -243,10 +279,10 @@ fun LocationTriggersScreen(
                 thresholdDbm = settings.sim2ThresholdDbm,
                 notDetectedText = "SIM 2 Not Detected",
                 onToggle = { enabled ->
-                    viewModel.updateSimTrigger(1, enabled, settings.sim2ThresholdDbm)
+                    viewModel.updateSimTrigger(context, 1, enabled, settings.sim2ThresholdDbm)
                 },
                 onThresholdChange = { dbm ->
-                    viewModel.updateSimTrigger(1, settings.isSim2TriggerEnabled, dbm)
+                    viewModel.updateSimTrigger(context, 1, settings.isSim2TriggerEnabled, dbm)
                 }
             )
 

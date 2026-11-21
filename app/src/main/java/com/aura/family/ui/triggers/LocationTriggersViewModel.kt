@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aura.family.background.AuraMonitoringService
 import com.aura.family.background.WorkScheduler
 import com.aura.family.data.local.PendingTelemetryDao
 import com.aura.family.data.preferences.AuraPreferencesRepository
@@ -67,16 +68,21 @@ class LocationTriggersViewModel(
         simSignalMonitor.refreshSubscriptions()
     }
 
-    fun updateLowBattery(enabled: Boolean, thresholdPercent: Int) {
+    fun updateLowBattery(context: Context, enabled: Boolean, thresholdPercent: Int) {
         viewModelScope.launch {
-            val snapped = ((thresholdPercent + 2) / 5) * 5
-            preferencesRepository.updateLowBatteryConfig(enabled, snapped.coerceIn(5, 50))
+            preferencesRepository.updateLowBatteryConfig(enabled, thresholdPercent.coerceIn(1, 99))
+            if (enabled) {
+                AuraMonitoringService.start(context.applicationContext)
+            }
         }
     }
 
-    fun updateSimTrigger(slotIndex: Int, enabled: Boolean, thresholdDbm: Int) {
+    fun updateSimTrigger(context: Context, slotIndex: Int, enabled: Boolean, thresholdDbm: Int) {
         viewModelScope.launch {
             preferencesRepository.updateSimConfig(slotIndex, enabled, thresholdDbm)
+            if (enabled) {
+                AuraMonitoringService.start(context.applicationContext)
+            }
         }
     }
 
@@ -84,6 +90,9 @@ class LocationTriggersViewModel(
         viewModelScope.launch {
             val clamped = intervalMinutes.coerceAtLeast(1)
             preferencesRepository.updatePeriodicConfig(enabled, clamped)
+            if (enabled) {
+                AuraMonitoringService.start(context.applicationContext)
+            }
             WorkScheduler.schedulePeriodicTelemetry(
                 context = context.applicationContext,
                 enabled = enabled,
@@ -98,7 +107,7 @@ class LocationTriggersViewModel(
             isSendingNow.value = true
             try {
                 when (val result = telemetryManager.triggerTelemetry(
-                    remarks = "On-Demand Manual Trigger",
+                    remarks = "ManualAlert | OnDemand",
                     sosFlag = true
                 )) {
                     is TelemetryDispatchResult.Sent -> {

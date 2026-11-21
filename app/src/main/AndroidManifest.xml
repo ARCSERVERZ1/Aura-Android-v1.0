@@ -49,6 +49,11 @@
             android:foregroundServiceType="location|dataSync" />
 
         <receiver
+            android:name=".background.PeriodicAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
             android:name=".background.BootCompletedReceiver"
             android:enabled="true"
             android:exported="true">

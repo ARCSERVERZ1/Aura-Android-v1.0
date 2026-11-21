@@ -128,7 +128,7 @@ class AuraPreferencesRepository(private val context: Context) {
     suspend fun updateLowBatteryConfig(enabled: Boolean, thresholdPercent: Int) {
         context.auraDataStore.edit { prefs ->
             prefs[Keys.LOW_BATTERY_ENABLED] = enabled
-            prefs[Keys.LOW_BATTERY_THRESHOLD] = thresholdPercent.coerceIn(5, 50)
+            prefs[Keys.LOW_BATTERY_THRESHOLD] = thresholdPercent.coerceIn(1, 99)
         }
     }
 

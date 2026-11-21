@@ -58,7 +58,7 @@ class DeviceMetricsCollector(
             locale = Locale.getDefault().toString(),
             uptimeMs = SystemClock.elapsedRealtime(),
             screenBrightness = brightness,
-            remarks = remarks,
+            remarks = remarks.ifBlank { "TelemetryUpdate | $networkType" },
             sosFlag = sosFlag,
             status = 1,
             timestamp = Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()

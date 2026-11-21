@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aura</string>
-    <string name="notification_channel_name">Aura Safety Monitoring</string>
-    <string name="notification_channel_description">Keeps background safety triggers and offline telemetry delivery active.</string>
-    <string name="notification_title">Aura Safety Service</string>
-    <string name="notification_body_active">Aura Safety Service is running</string>
-    <string name="notification_body_privacy">Privacy Mode Active — Location Sharing Paused</string>
+    <string name="notification_channel_name">Aura Background Service</string>
+    <string name="notification_channel_description">Keeps background safety triggers, periodic updates, and offline delivery active.</string>
+    <string name="notification_title">Aura</string>
+    <string name="notification_body_active">Aura is running in background</string>
+    <string name="notification_body_privacy">Aura is paused — Privacy Mode active</string>
 </resources>

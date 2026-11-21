@@ -84,7 +84,7 @@ class AuraMonitoringService : Service() {
         startForegroundWithAppropriateTypes(isPrivacyMode = false)
         registerBatteryReceiver()
         observeSettingsAndRunLoop()
-        startHeartbeatTicker()
+        startBackgroundSensorWatchdog()
         startSimSignalMonitoring()
     }
 
@@ -143,11 +143,22 @@ class AuraMonitoringService : Service() {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgType)
     }
 
-    private fun startHeartbeatTicker() {
+    private fun startBackgroundSensorWatchdog() {
+        val container = (application as AuraApplication).container
         serviceScope.launch {
             while (isActive) {
                 _diagnosticsState.update { it.copy(lastHeartbeatMs = System.currentTimeMillis()) }
-                delay(15_000L)
+
+                // Poll battery and SIM signal thresholds as fallback if OS throttles broadcasts/callbacks
+                val battery = container.deviceMetricsCollector.readBatterySnapshot()
+                handleBatteryUpdate(battery.levelPercent, battery.isCharging)
+
+                container.simSignalMonitor.refreshSubscriptions()
+                val simStatus = container.simSignalMonitor.dualSimStatus.value
+                simStatus.sim1.currentDbm?.let { handleSimSignalSample(0, it) }
+                simStatus.sim2.currentDbm?.let { handleSimSignalSample(1, it) }
+
+                delay(30_000L)
             }
         }
     }
@@ -183,7 +194,7 @@ class AuraMonitoringService : Service() {
 
                     if (!active) {
                         _diagnosticsState.update {
-                            it.copy(activeSchedulerMode = "Periodic Disabled (Triggers Active)")
+                            it.copy(activeSchedulerMode = "Periodic Disabled (Battery/Signal Active)")
                         }
                         return@collectLatest
                     }
@@ -198,25 +209,30 @@ class AuraMonitoringService : Service() {
                     if (intervalMinutes < 15) {
                         _diagnosticsState.update {
                             it.copy(
-                                activeSchedulerMode = "Foreground Service Loop (every $intervalMinutes min)"
+                                activeSchedulerMode = "AlarmManager + Service Loop (every $intervalMinutes min)"
                             )
                         }
                         shortIntervalJob = serviceScope.launch {
                             while (isActive) {
-                                delay(intervalMinutes * 60_000L)
-                                _diagnosticsState.update {
-                                    it.copy(lastPeriodicTickMs = System.currentTimeMillis())
+                                delay(15_000L)
+                                val elapsedMs = PeriodicAlarmReceiver.msSinceLastPeriodicDispatch(applicationContext)
+                                if (elapsedMs >= intervalMinutes * 60_000L) {
+                                    PeriodicAlarmReceiver.recordLastPeriodicDispatch(applicationContext)
+                                    PeriodicAlarmReceiver.scheduleNext(applicationContext, intervalMinutes)
+                                    _diagnosticsState.update {
+                                        it.copy(lastPeriodicTickMs = System.currentTimeMillis())
+                                    }
+                                    container.telemetryManager.triggerTelemetry(
+                                        remarks = "PeriodicUpdate | ${intervalMinutes}m",
+                                        sosFlag = false
+                                    )
                                 }
-                                container.telemetryManager.triggerTelemetry(
-                                    remarks = "Periodic Update ($intervalMinutes min)",
-                                    sosFlag = false
-                                )
                             }
                         }
                     } else {
                         _diagnosticsState.update {
                             it.copy(
-                                activeSchedulerMode = "WorkManager Periodic (every $intervalMinutes min)"
+                                activeSchedulerMode = "AlarmManager + WorkManager (every $intervalMinutes min)"
                             )
                         }
                     }
@@ -261,7 +277,7 @@ class AuraMonitoringService : Service() {
         if (batteryPct <= settings.lowBatteryThreshold && !isCharging && !settings.lowBatteryTriggered) {
             prefsRepo.setLowBatteryTriggered(true)
             container.telemetryManager.triggerTelemetry(
-                remarks = "Battery Trigger at $batteryPct%",
+                remarks = "BatteryLowAlert | $batteryPct",
                 sosFlag = true
             )
         }
@@ -283,9 +299,9 @@ class AuraMonitoringService : Service() {
         val now = System.currentTimeMillis()
         if (dbm <= threshold && (now - lastTriggerMs) >= SimSignalMonitor.COOLDOWN_MILLIS) {
             prefsRepo.recordSimTriggerTime(slotIndex, now)
-            val simLabel = if (slotIndex == 0) "SIM 1" else "SIM 2"
+            val simLabel = if (slotIndex == 0) "SIM1" else "SIM2"
             container.telemetryManager.triggerTelemetry(
-                remarks = "$simLabel Signal Trigger ($dbm dBm)",
+                remarks = "NetworkLowAlert | $dbm ($simLabel)",
                 sosFlag = true
             )
         }

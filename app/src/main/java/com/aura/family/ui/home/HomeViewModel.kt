@@ -106,7 +106,7 @@ class HomeViewModel(
             isSendingAlert.value = true
             try {
                 when (val result = telemetryManager.triggerTelemetry(
-                    remarks = "Manual SOS Trigger",
+                    remarks = "ManualAlert | SOS",
                     sosFlag = true
                 )) {
                     is TelemetryDispatchResult.Sent -> {

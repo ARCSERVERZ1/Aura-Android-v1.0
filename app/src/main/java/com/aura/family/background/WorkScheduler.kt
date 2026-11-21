@@ -24,15 +24,21 @@ object WorkScheduler {
         enabled: Boolean,
         intervalMinutes: Int
     ) {
-        val workManager = WorkManager.getInstance(context.applicationContext)
-        // Intervals < 15 min are handled directly by AuraMonitoringService's precision ticker
-        if (!enabled || intervalMinutes < 15) {
+        val appContext = context.applicationContext
+        val workManager = WorkManager.getInstance(appContext)
+        if (!enabled) {
+            PeriodicAlarmReceiver.cancel(appContext)
             workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
             return
         }
 
+        // Exact-interval background alarm (works for 1m, 2m, 15m, 60m+ even in Doze)
+        PeriodicAlarmReceiver.scheduleNext(appContext, intervalMinutes)
+
+        // OS-managed WorkManager watchdog (15m minimum enforced by Android WorkManager)
+        val watchdogInterval = intervalMinutes.coerceAtLeast(15).toLong()
         val request = PeriodicWorkRequestBuilder<PeriodicTelemetryWorker>(
-            intervalMinutes.toLong(),
+            watchdogInterval,
             TimeUnit.MINUTES
         )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)

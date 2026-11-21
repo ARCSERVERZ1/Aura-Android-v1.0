@@ -15,14 +15,30 @@ class PeriodicTelemetryWorker(
         val app = applicationContext as AuraApplication
         val settings = app.container.preferencesRepository.settingsFlow.first()
 
-        if (!settings.isOnboardingCompleted || !settings.isPeriodicEnabled || settings.isPrivacyModeEnabled) {
+        if (!settings.isOnboardingCompleted) {
             return Result.success()
         }
 
-        app.container.telemetryManager.triggerTelemetry(
-            remarks = "Periodic Update (${settings.periodicIntervalMinutes} min)",
-            sosFlag = false
-        )
+        // Ensure background service stays alive
+        AuraMonitoringService.start(applicationContext)
+
+        if (!settings.isPeriodicEnabled || settings.isPrivacyModeEnabled) {
+            return Result.success()
+        }
+
+        val intervalMs = settings.periodicIntervalMinutes.coerceAtLeast(1) * 60_000L
+        val elapsedSinceLast = PeriodicAlarmReceiver.msSinceLastPeriodicDispatch(applicationContext)
+
+        // Fire only if overdue (avoids duplicating PeriodicAlarmReceiver)
+        if (elapsedSinceLast >= (intervalMs * 0.85).toLong()) {
+            PeriodicAlarmReceiver.recordLastPeriodicDispatch(applicationContext)
+            PeriodicAlarmReceiver.scheduleNext(applicationContext, settings.periodicIntervalMinutes)
+            app.container.telemetryManager.triggerTelemetry(
+                remarks = "PeriodicUpdate | ${settings.periodicIntervalMinutes}m",
+                sosFlag = false
+            )
+        }
+
         return Result.success()
     }
 }
