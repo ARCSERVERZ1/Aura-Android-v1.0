@@ -265,7 +265,7 @@ fun DiagnosticsDialog(
                 val baseServicePctPerHour = if (serviceDiagnostics.isRunning) 0.15 else 0.0
                 val baseServicePctPerDay = baseServicePctPerHour * 24.0
                 val anySensorActive = !settings.isPrivacyModeEnabled &&
-                    (settings.isLowBatteryEnabled || settings.isSim1SignalEnabled || settings.isSim2SignalEnabled)
+                    (settings.isLowBatteryEnabled || settings.isSim1TriggerEnabled || settings.isSim2TriggerEnabled)
                 val listenerPctPerHour = if (anySensorActive) 0.02 else 0.0
                 val listenerPctPerDay = listenerPctPerHour * 24.0
                 val sendsPerDay = if (settings.isPrivacyModeEnabled || !settings.isPeriodicEnabled) {
