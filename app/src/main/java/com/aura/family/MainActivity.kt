@@ -110,6 +110,7 @@ private fun AuraNavHost(
                     appContext = container.appContext,
                     preferencesRepository = container.preferencesRepository,
                     pendingTelemetryDao = container.database.pendingTelemetryDao(),
+                    sentTelemetryDao = container.database.sentTelemetryDao(),
                     simSignalMonitor = container.simSignalMonitor,
                     telemetryManager = container.telemetryManager
                 )

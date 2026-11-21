@@ -107,8 +107,8 @@ class LocationTriggersViewModel(
             isSendingNow.value = true
             try {
                 when (val result = telemetryManager.triggerTelemetry(
-                    remarks = "ManualAlert | OnDemand",
-                    sosFlag = true
+                    remarks = "ManualCheckIn | OnDemand",
+                    sosFlag = false
                 )) {
                     is TelemetryDispatchResult.Sent -> {
                         _messages.emit("Location & status sent (${result.timestamp})")

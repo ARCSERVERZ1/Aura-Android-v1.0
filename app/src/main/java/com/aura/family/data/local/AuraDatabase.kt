@@ -6,13 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [PendingTelemetryEntity::class],
-    version = 1,
+    entities = [PendingTelemetryEntity::class, SentTelemetryEntity::class],
+    version = 2,
     exportSchema = false
 )
 abstract class AuraDatabase : RoomDatabase() {
 
     abstract fun pendingTelemetryDao(): PendingTelemetryDao
+    abstract fun sentTelemetryDao(): SentTelemetryDao
 
     companion object {
         @Volatile

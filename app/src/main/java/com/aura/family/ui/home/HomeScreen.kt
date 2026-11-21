@@ -14,6 +14,7 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,9 +24,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -33,14 +37,13 @@ import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MyLocation
-import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -50,17 +53,15 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -80,15 +81,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aura.family.ui.diagnostics.DiagnosticsDialog
+import com.aura.family.ui.theme.AlertCrimson
 import com.aura.family.ui.theme.DeepNavy
 import com.aura.family.ui.theme.SoftTeal
-import com.aura.family.ui.theme.SuccessEmerald
 import com.aura.family.ui.theme.WarningAmber
 import com.aura.family.ui.theme.WarningAmberContainer
 import kotlinx.coroutines.Job
@@ -187,10 +189,12 @@ fun HomeScreen(
             serviceDiagnostics = uiState.serviceDiagnostics,
             dualSimStatus = uiState.dualSimStatus,
             pendingItems = uiState.pendingItems,
+            sentHistory = uiState.sentHistory,
             periodicWorkState = uiState.periodicWorkState,
             syncWorkState = uiState.syncWorkState,
             onFlushQueue = viewModel::flushPendingQueue,
             onClearQueue = viewModel::clearPendingQueue,
+            onClearSentHistory = viewModel::clearSentHistory,
             onRestartService = { viewModel.restartBackgroundService(context) },
             onRefreshSignals = viewModel::refreshSignals,
             onDismiss = { showDiagnostics = false }
@@ -300,6 +304,66 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Privacy Mode Switch inside Hamburger Drawer
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            viewModel.togglePrivacyMode(context, !uiState.isPrivacyModeEnabled)
+                        }
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.isPrivacyModeEnabled) {
+                                Icons.Rounded.Shield
+                            } else {
+                                Icons.Outlined.Shield
+                            },
+                            contentDescription = null,
+                            tint = if (uiState.isPrivacyModeEnabled) {
+                                WarningAmber
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        Column {
+                            Text(
+                                text = "Privacy Mode",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (uiState.isPrivacyModeEnabled) {
+                                    "Location & triggers paused"
+                                } else {
+                                    "Safety monitoring active"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = uiState.isPrivacyModeEnabled,
+                        onCheckedChange = { checked ->
+                            viewModel.togglePrivacyMode(context, checked)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = WarningAmber
+                        )
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp))
+
                 NavigationDrawerItem(
                     icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
                     label = { Text("App Settings") },
@@ -321,157 +385,183 @@ fun HomeScreen(
                     },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp))
-
-                NavigationDrawerItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.NotificationsActive,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    },
-                    label = { Text("Send Alert Now") },
-                    selected = false,
-                    onClick = {
-                        coroutineScope.launch { drawerState.close() }
-                        viewModel.sendManualAlertNow()
-                    },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
             }
         }
     ) {
         Scaffold(
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = {
-                Column {
-                    CenterAlignedTopAppBar(
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            titleContentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        navigationIcon = {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+                ) {
+                    Column(modifier = Modifier.statusBarsPadding()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp)
+                                .padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             IconButton(
-                                onClick = {
-                                    coroutineScope.launch { drawerState.open() }
-                                }
+                                onClick = { coroutineScope.launch { drawerState.open() } },
+                                modifier = Modifier.size(38.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Menu,
-                                    contentDescription = "Open navigation menu"
+                                    contentDescription = "Open navigation menu",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                        },
-                        title = {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "Aura",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = activeDomainSubtitle,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        },
-                        actions = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(end = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (uiState.isPrivacyModeEnabled) {
-                                        Icons.Rounded.Shield
-                                    } else {
-                                        Icons.Outlined.Shield
-                                    },
-                                    contentDescription = "Privacy Mode",
-                                    tint = if (uiState.isPrivacyModeEnabled) {
-                                        WarningAmber
-                                    } else {
-                                        SuccessEmerald
-                                    },
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Switch(
-                                    checked = uiState.isPrivacyModeEnabled,
-                                    onCheckedChange = { checked ->
-                                        viewModel.togglePrivacyMode(context, checked)
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = WarningAmber
+
+                            Text(
+                                text = "Aura · $activeDomainSubtitle",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 6.dp)
+                            )
+
+                            if (uiState.isPrivacyModeEnabled) {
+                                IconButton(
+                                    onClick = { coroutineScope.launch { drawerState.open() } },
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Shield,
+                                        contentDescription = "Privacy Mode Active",
+                                        tint = WarningAmber,
+                                        modifier = Modifier.size(18.dp)
                                     )
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.width(38.dp))
+                            }
+                        }
+
+                        AnimatedVisibility(visible = uiState.isPrivacyModeEnabled) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(WarningAmberContainer)
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Privacy Mode Active — Location Sharing Paused",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF92400E)
                                 )
                             }
                         }
-                    )
 
-                    AnimatedVisibility(visible = uiState.isPrivacyModeEnabled) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(WarningAmberContainer)
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Privacy Mode Active — Location Sharing Paused",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Color(0xFF92400E)
+                        if (pageProgress in 1..99) {
+                            LinearProgressIndicator(
+                                progress = { pageProgress / 100f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.dp),
+                                color = SoftTeal
+                            )
+                        } else {
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                             )
                         }
-                    }
-
-                    if (pageProgress in 1..99) {
-                        LinearProgressIndicator(
-                            progress = { pageProgress / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = SoftTeal
-                        )
                     }
                 }
             },
             bottomBar = {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                    shadowElevation = 2.dp
                 ) {
-                    NavigationBarItem(
-                        selected = true,
-                        onClick = {
-                            if (uiState.homeUrl.isNotBlank()) {
-                                webViewRef?.loadUrl(uiState.homeUrl)
-                            } else {
-                                onNavigateToAppSettings()
+                    Column {
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .height(46.dp)
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            // Symbol 1: Home
+                            IconButton(
+                                onClick = {
+                                    if (uiState.homeUrl.isNotBlank()) {
+                                        webViewRef?.loadUrl(uiState.homeUrl)
+                                    } else {
+                                        onNavigateToAppSettings()
+                                    }
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Home,
+                                    contentDescription = "Home",
+                                    modifier = Modifier.size(22.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
                             }
-                        },
-                        icon = { Icon(Icons.Rounded.Home, contentDescription = "Home") },
-                        label = { Text("Home") }
-                    )
-                    NavigationBarItem(
-                        selected = false,
-                        onClick = {
-                            if (webViewRef?.canGoBack() == true) {
-                                webViewRef?.goBack()
-                            } else {
-                                activity?.moveTaskToBack(true)
+
+                            // Symbol 2 (Center): Exclusive SOS Trigger
+                            Surface(
+                                onClick = { viewModel.sendSosAlert() },
+                                enabled = !uiState.isSendingSos,
+                                shape = CircleShape,
+                                color = AlertCrimson,
+                                contentColor = Color.White,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (uiState.isSendingSos) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color.White
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "SOS",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            letterSpacing = 0.4.sp,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
                             }
-                        },
-                        icon = {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = "Back"
-                            )
-                        },
-                        label = { Text("Back") }
-                    )
+
+                            // Symbol 3: Back
+                            IconButton(
+                                onClick = {
+                                    if (webViewRef?.canGoBack() == true) {
+                                        webViewRef?.goBack()
+                                    } else {
+                                        activity?.moveTaskToBack(true)
+                                    }
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = "Back",
+                                    modifier = Modifier.size(22.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
         ) { innerPadding ->

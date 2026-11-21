@@ -44,7 +44,9 @@ data class ServiceDiagnosticsState(
     val startedAtMs: Long = 0L,
     val lastHeartbeatMs: Long = 0L,
     val activeSchedulerMode: String = "Stopped",
-    val lastPeriodicTickMs: Long = 0L
+    val lastPeriodicTickMs: Long = 0L,
+    val initialBatteryPct: Int? = null,
+    val currentBatteryPct: Int? = null
 )
 
 class AuraMonitoringService : Service() {
@@ -74,11 +76,15 @@ class AuraMonitoringService : Service() {
     override fun onCreate() {
         super.onCreate()
         val now = System.currentTimeMillis()
+        val initialBattery = (application as AuraApplication)
+            .container.deviceMetricsCollector.readBatterySnapshot().levelPercent
         _diagnosticsState.value = ServiceDiagnosticsState(
             isRunning = true,
             startedAtMs = now,
             lastHeartbeatMs = now,
-            activeSchedulerMode = "Initializing"
+            activeSchedulerMode = "Initializing",
+            initialBatteryPct = initialBattery,
+            currentBatteryPct = initialBattery
         )
         createNotificationChannel()
         startForegroundWithAppropriateTypes(isPrivacyMode = false)
@@ -147,10 +153,16 @@ class AuraMonitoringService : Service() {
         val container = (application as AuraApplication).container
         serviceScope.launch {
             while (isActive) {
-                _diagnosticsState.update { it.copy(lastHeartbeatMs = System.currentTimeMillis()) }
+                val battery = container.deviceMetricsCollector.readBatterySnapshot()
+                _diagnosticsState.update {
+                    it.copy(
+                        lastHeartbeatMs = System.currentTimeMillis(),
+                        initialBatteryPct = it.initialBatteryPct ?: battery.levelPercent,
+                        currentBatteryPct = battery.levelPercent
+                    )
+                }
 
                 // Poll battery and SIM signal thresholds as fallback if OS throttles broadcasts/callbacks
-                val battery = container.deviceMetricsCollector.readBatterySnapshot()
                 handleBatteryUpdate(battery.levelPercent, battery.isCharging)
 
                 container.simSignalMonitor.refreshSubscriptions()
@@ -262,6 +274,7 @@ class AuraMonitoringService : Service() {
     }
 
     private suspend fun handleBatteryUpdate(batteryPct: Int, isCharging: Boolean) {
+        _diagnosticsState.update { it.copy(currentBatteryPct = batteryPct) }
         val container = (application as AuraApplication).container
         val prefsRepo = container.preferencesRepository
         val settings = prefsRepo.settingsFlow.first()
@@ -277,8 +290,8 @@ class AuraMonitoringService : Service() {
         if (batteryPct <= settings.lowBatteryThreshold && !isCharging && !settings.lowBatteryTriggered) {
             prefsRepo.setLowBatteryTriggered(true)
             container.telemetryManager.triggerTelemetry(
-                remarks = "BatteryLowAlert | $batteryPct",
-                sosFlag = true
+                remarks = "BatteryLowAlert | $batteryPct% (Threshold ${settings.lowBatteryThreshold}%)",
+                sosFlag = false
             )
         }
     }
@@ -301,8 +314,8 @@ class AuraMonitoringService : Service() {
             prefsRepo.recordSimTriggerTime(slotIndex, now)
             val simLabel = if (slotIndex == 0) "SIM1" else "SIM2"
             container.telemetryManager.triggerTelemetry(
-                remarks = "NetworkLowAlert | $dbm ($simLabel)",
-                sosFlag = true
+                remarks = "NetworkLowAlert | $dbm dBm ($simLabel, Threshold $threshold dBm)",
+                sosFlag = false
             )
         }
     }

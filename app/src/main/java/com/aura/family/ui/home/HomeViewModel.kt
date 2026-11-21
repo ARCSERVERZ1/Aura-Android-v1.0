@@ -10,6 +10,8 @@ import com.aura.family.background.ServiceDiagnosticsState
 import com.aura.family.background.WorkScheduler
 import com.aura.family.data.local.PendingTelemetryDao
 import com.aura.family.data.local.PendingTelemetryEntity
+import com.aura.family.data.local.SentTelemetryDao
+import com.aura.family.data.local.SentTelemetryEntity
 import com.aura.family.data.preferences.AuraPreferencesRepository
 import com.aura.family.data.preferences.AuraSettings
 import com.aura.family.telemetry.DualSimStatus
@@ -29,11 +31,12 @@ import kotlinx.coroutines.launch
 data class HomeUiState(
     val settings: AuraSettings = AuraSettings(),
     val pendingItems: List<PendingTelemetryEntity> = emptyList(),
+    val sentHistory: List<SentTelemetryEntity> = emptyList(),
     val serviceDiagnostics: ServiceDiagnosticsState = ServiceDiagnosticsState(),
     val dualSimStatus: DualSimStatus = DualSimStatus(),
     val periodicWorkState: WorkInfo.State? = null,
     val syncWorkState: WorkInfo.State? = null,
-    val isSendingManualAlert: Boolean = false
+    val isSendingSos: Boolean = false
 ) {
     val userName: String get() = settings.userName
     val baseUrl: String get() = settings.baseUrl
@@ -46,38 +49,41 @@ class HomeViewModel(
     appContext: Context,
     private val preferencesRepository: AuraPreferencesRepository,
     private val pendingTelemetryDao: PendingTelemetryDao,
+    private val sentTelemetryDao: SentTelemetryDao,
     private val simSignalMonitor: SimSignalMonitor,
     private val telemetryManager: TelemetryManager
 ) : ViewModel() {
 
-    private val isSendingAlert = MutableStateFlow(false)
+    private val isSendingSos = MutableStateFlow(false)
 
     private val coreFlow = combine(
         preferencesRepository.settingsFlow,
         pendingTelemetryDao.observeAllPending(),
+        sentTelemetryDao.observeLastTen(),
         AuraMonitoringService.diagnosticsState
-    ) { settings, pendingItems, serviceDiag ->
-        Triple(settings, pendingItems, serviceDiag)
+    ) { settings, pendingItems, sentHistory, serviceDiag ->
+        CoreState(settings, pendingItems, sentHistory, serviceDiag)
     }
 
     private val workAndSimFlow = combine(
         simSignalMonitor.dualSimStatus,
         WorkScheduler.observeWorkInfo(appContext, WorkScheduler.PERIODIC_WORK_NAME),
         WorkScheduler.observeWorkInfo(appContext, WorkScheduler.PENDING_SYNC_WORK_NAME),
-        isSendingAlert
+        isSendingSos
     ) { simStatus, periodicInfo, syncInfo, sending ->
-        Quad(simStatus, periodicInfo?.state, syncInfo?.state, sending)
+        WorkSimState(simStatus, periodicInfo?.state, syncInfo?.state, sending)
     }
 
     val uiState: StateFlow<HomeUiState> = combine(coreFlow, workAndSimFlow) { core, extra ->
         HomeUiState(
-            settings = core.first,
-            pendingItems = core.second,
-            serviceDiagnostics = core.third,
-            dualSimStatus = extra.first,
-            periodicWorkState = extra.second,
-            syncWorkState = extra.third,
-            isSendingManualAlert = extra.fourth
+            settings = core.settings,
+            pendingItems = core.pendingItems,
+            sentHistory = core.sentHistory,
+            serviceDiagnostics = core.serviceDiag,
+            dualSimStatus = extra.simStatus,
+            periodicWorkState = extra.periodicState,
+            syncWorkState = extra.syncState,
+            isSendingSos = extra.isSendingSos
         )
     }.stateIn(
         scope = viewModelScope,
@@ -100,30 +106,30 @@ class HomeViewModel(
         }
     }
 
-    fun sendManualAlertNow() {
+    fun sendSosAlert() {
         viewModelScope.launch {
-            if (isSendingAlert.value) return@launch
-            isSendingAlert.value = true
+            if (isSendingSos.value) return@launch
+            isSendingSos.value = true
             try {
                 when (val result = telemetryManager.triggerTelemetry(
-                    remarks = "ManualAlert | SOS",
+                    remarks = "SOS | Emergency Alert",
                     sosFlag = true
                 )) {
                     is TelemetryDispatchResult.Sent -> {
-                        _snackbarMessages.emit("Alert sent to family portal")
+                        _snackbarMessages.emit("SOS alert sent to family portal")
                     }
                     is TelemetryDispatchResult.QueuedOffline -> {
-                        _snackbarMessages.emit("Offline — alert queued for automatic retry")
+                        _snackbarMessages.emit("Offline — SOS alert queued for automatic retry")
                     }
                     TelemetryDispatchResult.BlockedByPrivacyMode -> {
-                        _snackbarMessages.emit("Privacy Mode is ON — turn it off to send an alert")
+                        _snackbarMessages.emit("Privacy Mode is ON — turn it off to send SOS")
                     }
                     TelemetryDispatchResult.MissingBaseUrl -> {
                         _snackbarMessages.emit("Please configure the Family Portal URL in App Settings")
                     }
                 }
             } finally {
-                isSendingAlert.value = false
+                isSendingSos.value = false
             }
         }
     }
@@ -148,6 +154,13 @@ class HomeViewModel(
         }
     }
 
+    fun clearSentHistory() {
+        viewModelScope.launch {
+            sentTelemetryDao.clearAll()
+            _snackbarMessages.emit("Sent history cleared")
+        }
+    }
+
     fun restartBackgroundService(context: Context) {
         AuraMonitoringService.start(context.applicationContext)
         simSignalMonitor.refreshSubscriptions()
@@ -157,17 +170,25 @@ class HomeViewModel(
         simSignalMonitor.refreshSubscriptions()
     }
 
-    private data class Quad<A, B, C, D>(
-        val first: A,
-        val second: B,
-        val third: C,
-        val fourth: D
+    private data class CoreState(
+        val settings: AuraSettings,
+        val pendingItems: List<PendingTelemetryEntity>,
+        val sentHistory: List<SentTelemetryEntity>,
+        val serviceDiag: ServiceDiagnosticsState
+    )
+
+    private data class WorkSimState(
+        val simStatus: DualSimStatus,
+        val periodicState: WorkInfo.State?,
+        val syncState: WorkInfo.State?,
+        val isSendingSos: Boolean
     )
 
     class Factory(
         private val appContext: Context,
         private val preferencesRepository: AuraPreferencesRepository,
         private val pendingTelemetryDao: PendingTelemetryDao,
+        private val sentTelemetryDao: SentTelemetryDao,
         private val simSignalMonitor: SimSignalMonitor,
         private val telemetryManager: TelemetryManager
     ) : ViewModelProvider.Factory {
@@ -177,6 +198,7 @@ class HomeViewModel(
                 appContext = appContext.applicationContext,
                 preferencesRepository = preferencesRepository,
                 pendingTelemetryDao = pendingTelemetryDao,
+                sentTelemetryDao = sentTelemetryDao,
                 simSignalMonitor = simSignalMonitor,
                 telemetryManager = telemetryManager
             ) as T

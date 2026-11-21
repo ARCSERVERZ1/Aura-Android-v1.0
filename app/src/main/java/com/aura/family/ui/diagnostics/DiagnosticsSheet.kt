@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -57,6 +58,7 @@ import androidx.core.content.ContextCompat
 import androidx.work.WorkInfo
 import com.aura.family.background.ServiceDiagnosticsState
 import com.aura.family.data.local.PendingTelemetryEntity
+import com.aura.family.data.local.SentTelemetryEntity
 import com.aura.family.data.preferences.AuraSettings
 import com.aura.family.data.remote.NetworkModule
 import com.aura.family.telemetry.DualSimStatus
@@ -68,6 +70,7 @@ import com.aura.family.ui.theme.WarningAmber
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,10 +79,12 @@ fun DiagnosticsDialog(
     serviceDiagnostics: ServiceDiagnosticsState,
     dualSimStatus: DualSimStatus,
     pendingItems: List<PendingTelemetryEntity>,
+    sentHistory: List<SentTelemetryEntity>,
     periodicWorkState: WorkInfo.State?,
     syncWorkState: WorkInfo.State?,
     onFlushQueue: () -> Unit,
     onClearQueue: () -> Unit,
+    onClearSentHistory: () -> Unit,
     onRestartService: () -> Unit,
     onRefreshSignals: () -> Unit,
     onDismiss: () -> Unit
@@ -256,7 +261,113 @@ fun DiagnosticsDialog(
                     }
                 }
 
-                // 2. Room Queue Inspector
+                // 2. Background Battery Impact Math
+                val baseServicePctPerHour = if (serviceDiagnostics.isRunning) 0.15 else 0.0
+                val baseServicePctPerDay = baseServicePctPerHour * 24.0
+                val anySensorActive = !settings.isPrivacyModeEnabled &&
+                    (settings.isLowBatteryEnabled || settings.isSim1SignalEnabled || settings.isSim2SignalEnabled)
+                val listenerPctPerHour = if (anySensorActive) 0.02 else 0.0
+                val listenerPctPerDay = listenerPctPerHour * 24.0
+                val sendsPerDay = if (settings.isPrivacyModeEnabled || !settings.isPeriodicEnabled) {
+                    0.0
+                } else {
+                    1440.0 / settings.periodicIntervalMinutes.coerceAtLeast(1)
+                }
+                val burstCostPerSendPct = 0.03
+                val periodicPctPerDay = sendsPerDay * burstCostPerSendPct
+                val totalPctPerDay = baseServicePctPerDay + listenerPctPerDay + periodicPctPerDay
+                val totalPctPerHour = totalPctPerDay / 24.0
+
+                val observedDeltaText = if (
+                    serviceDiagnostics.initialBatteryPct != null &&
+                    serviceDiagnostics.currentBatteryPct != null &&
+                    serviceDiagnostics.startedAtMs > 0L
+                ) {
+                    val elapsedMinutes = ((System.currentTimeMillis() - serviceDiagnostics.startedAtMs) / 60_000L)
+                        .coerceAtLeast(1L)
+                    val delta = serviceDiagnostics.initialBatteryPct - serviceDiagnostics.currentBatteryPct
+                    val sign = if (delta > 0) "-" else if (delta < 0) "+" else ""
+                    val absDelta = kotlin.math.abs(delta)
+                    "${serviceDiagnostics.initialBatteryPct}% → ${serviceDiagnostics.currentBatteryPct}% ($sign$absDelta% in ${elapsedMinutes}m)"
+                } else {
+                    "Service not running"
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Background Battery Impact",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = String.format(Locale.US, "~%.2f%% / 24h", totalPctPerDay),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = SoftTeal
+                            )
+                        }
+
+                        DiagnosticRow(
+                            label = "Service + 30s Watchdog",
+                            value = String.format(
+                                Locale.US,
+                                "%.2f%%/hr × 24h = %.2f%%",
+                                baseServicePctPerHour,
+                                baseServicePctPerDay
+                            )
+                        )
+                        DiagnosticRow(
+                            label = "SIM + Battery Listeners",
+                            value = String.format(
+                                Locale.US,
+                                "%.2f%%/hr × 24h = %.2f%%",
+                                listenerPctPerHour,
+                                listenerPctPerDay
+                            )
+                        )
+                        DiagnosticRow(
+                            label = "Periodic GPS + POST",
+                            value = if (sendsPerDay > 0.0) {
+                                String.format(
+                                    Locale.US,
+                                    "%.0f sends/day × %.2f%% = %.2f%%",
+                                    sendsPerDay,
+                                    burstCostPerSendPct,
+                                    periodicPctPerDay
+                                )
+                            } else {
+                                "0 sends/day (0.00%)"
+                            }
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                        DiagnosticRow(
+                            label = "Total Estimated Drain",
+                            value = String.format(
+                                Locale.US,
+                                "~%.2f%% / hr (~%.2f%% / day)",
+                                totalPctPerHour,
+                                totalPctPerDay
+                            )
+                        )
+                        DiagnosticRow(
+                            label = "Observed This Session",
+                            value = observedDeltaText
+                        )
+                    }
+                }
+
+                // 3. Room Queue Inspector
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -445,6 +556,112 @@ fun DiagnosticsDialog(
                             label = "Phone / Notifications",
                             value = "${yesNo(phoneStateGranted)} / ${yesNo(notifGranted)}"
                         )
+                    }
+                }
+
+                // 5. Last 10 Sent API Calls
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Last 10 Sent API Calls",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "${sentHistory.size} / 10",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (sentHistory.isEmpty()) {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    } else {
+                                        SuccessEmerald
+                                    }
+                                )
+                                if (sentHistory.isNotEmpty()) {
+                                    TextButton(onClick = onClearSentHistory) {
+                                        Text("Clear")
+                                    }
+                                }
+                            }
+                        }
+
+                        if (sentHistory.isEmpty()) {
+                            Text(
+                                text = "No delivered API calls logged yet. Sent payloads appear here with their exact remarks and JSON.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            sentHistory.forEach { item ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = item.remarks.ifBlank { "TelemetryUpdate" },
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                if (item.sosFlag) {
+                                                    Text(
+                                                        text = "SOS",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = AlertCrimson
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "HTTP ${item.httpCode}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = SuccessEmerald
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "${formatEpoch(item.sentAtMs)} · Bat ${item.batteryLevel}% · ${item.networkType}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = item.payloadJson,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace
+                                            ),
+                                            color = Color(0xFFE2E8F0),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(DeepNavy, RoundedCornerShape(8.dp))
+                                                .padding(8.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

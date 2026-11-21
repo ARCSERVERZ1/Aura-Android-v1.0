@@ -36,6 +36,7 @@ class AppContainer(context: Context) {
             context = appContext,
             preferencesRepository = preferencesRepository,
             pendingTelemetryDao = database.pendingTelemetryDao(),
+            sentTelemetryDao = database.sentTelemetryDao(),
             metricsCollector = deviceMetricsCollector,
             apiService = NetworkModule.telemetryApiService
         )
